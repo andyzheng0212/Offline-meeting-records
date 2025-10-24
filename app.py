@@ -9,6 +9,7 @@ from typing import List, Optional
 import PySimpleGUI as sg
 import yaml
 
+from asr_vosk import ASRBackend, build_asr
 from asr_vosk import ASRModel, build_asr
 from destroyer import Destroyer, build_destroyer
 from formatter_docx import create_minutes_document, load_action_items
@@ -30,12 +31,25 @@ class OfflineMeetingApp:
     def __init__(self, config_path: Path) -> None:
         self.base_path = config_path.parent
         self.config = self._load_config(config_path)
+        self.pending_warnings: List[str] = []
+        self.model_path = self.base_path / self.config["asr"]["model_path"]
         self.recorder: AudioRecorder = build_recorder(self.config, self.base_path)
         self.summarizer: SummaryBuilder = build_summarizer(self.config, self.base_path)
         self.person_dict = self.summarizer.person_dict
         self.destroyer: Destroyer = build_destroyer(self.config, self.base_path)
         self.policy_db: PolicyDatabase = build_policy_db(self.config, self.base_path)
         self.window: Optional[sg.Window] = None
+        self.asr: Optional[ASRBackend] = None
+        if not self.model_path.exists():
+            self.pending_warnings.append(
+                "未检测到 Vosk 中文模型，请下载并解压到 models/vosk-model-cn 目录。具体步骤见 README。"
+            )
+        else:
+            try:
+                self.asr = build_asr(self.config, self.base_path)
+            except Exception as exc:  # Model issues
+                self.pending_warnings.append(f"Vosk 模型加载失败：{exc}")
+                self.asr = None
         try:
             self.asr: Optional[ASRModel] = build_asr(self.config, self.base_path)
         except Exception as exc:  # Model missing etc.
@@ -101,6 +115,7 @@ class OfflineMeetingApp:
             ],
         ]
 
+        asr_text, asr_color = self._current_asr_status()
         tab_record = [
             [
                 sg.Button("开始录音", size=(12, 1), button_color=("white", "#43A047")),
@@ -111,6 +126,9 @@ class OfflineMeetingApp:
                 sg.Button("录音校对", size=(12, 1), button_color=("white", "#8E24AA")),
                 sg.Text("ASR 状态："),
                 sg.Text(
+                    asr_text,
+                    key="asr_status",
+                    text_color=asr_color,
                     "已就绪" if self.asr else "未加载",
                     key="asr_status",
                     text_color="#FFEB3B" if not self.asr else "#C5E1A5",
@@ -177,6 +195,8 @@ class OfflineMeetingApp:
         )
         self.window = window
         self._refresh_contact_status()
+        self._update_asr_status()
+        self._show_startup_warnings()
         sg.theme("SystemDefault")
         layout = [
             [sg.Text("会议标题"), sg.Input(key="title", size=(25, 1)), sg.Text("会议主题"), sg.Input(key="topic", size=(25, 1))],
@@ -237,6 +257,10 @@ class OfflineMeetingApp:
             self.log(f"录音开始，会话 {session_id}")
             sg.popup("录音已开始。")
             self.set_status("录音进行中…")
+            warning = self.recorder.pop_last_warning()
+            if warning:
+                self.log(warning.replace("\n", " / "))
+                sg.popup_ok(warning)
         except RecorderError as exc:
             sg.popup_error(str(exc))
 
@@ -269,12 +293,15 @@ class OfflineMeetingApp:
         self.set_status("快速版纪要已生成。")
 
     def handle_proofreading(self) -> None:
+        if not self._ensure_asr():
+            return
         if not self.asr:
             raise RuntimeError("Vosk 模型未准备，无法进行录音校对。")
         audio_dir = self.base_path / self.paths["audio_dir"]
         wav_files = sorted(audio_dir.glob("*.wav"))
         if not wav_files:
             raise FileNotFoundError("未找到录音文件，请先完成录音。")
+        assert self.asr is not None
         transcript_text = self.asr.transcribe_files(wav_files)
         transcript_path = self._write_transcript(transcript_text)
         proof_path = self.summarizer.generate_proofreading_summary(
@@ -304,6 +331,17 @@ class OfflineMeetingApp:
         return transcript_path
 
     def handle_import_policies(self) -> None:
+        source_dir = self.base_path / self.paths["policy_source_dir"]
+        candidates = [
+            f
+            for f in source_dir.glob("**/*")
+            if f.suffix.lower() in {".pdf", ".docx"} and f.is_file()
+        ]
+        if not candidates:
+            message = "未检测到PDF/Word，将跳过导入。"
+            self.log(message)
+            sg.popup_ok(message)
+            return
         count = self.policy_db.import_sources()
         self.log(f"已导入 {count} 条制度内容。")
         sg.popup(f"导入完成，共 {count} 条。仅提示，不构成合规结论。")
@@ -336,6 +374,8 @@ class OfflineMeetingApp:
         minutes_dir.mkdir(parents=True, exist_ok=True)
         filename = f"minutes_{time.strftime('%Y%m%d_%H%M%S')}.docx"
         output_path = minutes_dir / filename
+        has_proof = self.state.proofreading_path and self.state.proofreading_path.exists()
+        summary_title = "录音校对定稿" if has_proof else "快速版纪要"
         summary_title = "快速版纪要" if self.state.quick_summary_path else "录音校对摘要"
         summary_content = ""
         if self.state.proofreading_path and self.state.proofreading_path.exists():
@@ -371,6 +411,27 @@ class OfflineMeetingApp:
         self.log(f"纪要已导出：{output_path.name}")
         sg.popup("纪要已导出。")
         self.set_status(f"纪要已导出（模板：{template_choice}）。")
+
+    def handle_destroy(self) -> None:
+        include_minutes = sg.popup_yes_no("是否连同纪要一并销毁？") == "Yes"
+        summary = self.destroyer.destroy(include_minutes=include_minutes)
+        results = summary["results"]
+        lines = []
+        for result in results:
+            if not result.existed:
+                continue
+            rel = result.path.relative_to(self.base_path)
+            mode_label = "SDelete 覆盖删除" if result.mode == "sdelete" else "普通删除"
+            lines.append(f"- {rel}（{mode_label}）")
+        if not lines:
+            lines.append("- 无需清理（目录为空）")
+        message_lines = ["一键销毁完成，已处理以下路径：", *lines]
+        if summary.get("fallback_used"):
+            fallback_message = summary.get("message") or "已使用普通删除，建议开启全盘加密（如 BitLocker）。"
+            message_lines.extend(["", fallback_message])
+            self.log(fallback_message)
+        self.log("一键销毁完成。")
+        sg.popup("\n".join(message_lines))
         )
         self.log(f"纪要已导出：{output_path.name}")
         sg.popup("纪要已导出。")
@@ -403,6 +464,41 @@ class OfflineMeetingApp:
                 else "责任人词典：未加载"
             )
             self.window["contact_status"].update(status_text)
+
+    def _update_asr_status(self) -> None:
+        if self.window and "asr_status" in self.window.AllKeysDict:
+            text, color = self._current_asr_status()
+            self.window["asr_status"].update(text, text_color=color)
+
+    def _current_asr_status(self) -> tuple[str, str]:
+        if self.asr:
+            return "已就绪", "#C5E1A5"
+        return "未加载", "#FFEB3B"
+
+    def _show_startup_warnings(self) -> None:
+        for warning in self.pending_warnings:
+            self.log(warning)
+            sg.popup_ok(warning)
+        self.pending_warnings.clear()
+
+    def _ensure_asr(self) -> bool:
+        if self.asr:
+            return True
+        if not self.model_path.exists():
+            message = "未检测到 Vosk 中文模型，请下载并解压到 models/vosk-model-cn 目录（详见 README）。"
+            self.log(message)
+            sg.popup_ok(message)
+            return False
+        try:
+            self.asr = build_asr(self.config, self.base_path)
+            self.log("Vosk 模型已加载。")
+            self._update_asr_status()
+            return True
+        except Exception as exc:
+            error_message = f"Vosk 模型加载失败：{exc}"
+            self.log(error_message)
+            sg.popup_error(error_message)
+            return False
 
     def _enforce_retention(self) -> None:
         self._cleanup_by_days(self.base_path / self.paths["audio_dir"], self.storage_cfg.get("retain_audio_days", -1))

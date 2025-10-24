@@ -59,6 +59,7 @@ class AudioRecorder:
         self._file_index = 0
         self.config.audio_dir.mkdir(parents=True, exist_ok=True)
         self.config.markers_dir.mkdir(parents=True, exist_ok=True)
+        self._last_warning: Optional[str] = None
 
     @property
     def session_id(self) -> Optional[str]:
@@ -82,6 +83,43 @@ class AudioRecorder:
                 print(f"[Recorder] Input stream status: {status}")
             self._queue.put(indata.copy())
 
+        self._last_warning = None
+        try:
+            self._stream = sd.InputStream(
+                samplerate=self.config.sample_rate,
+                channels=self.config.channels,
+                dtype="float32",
+                callback=callback,
+                device=self.config.device,
+            )
+            self._stream.start()
+        except (sd.PortAudioError, ValueError) as exc:
+            available = self.list_input_devices()
+            if self.config.device is None:
+                raise RecorderError(f"无法启动录音，请检查麦克风设备：{exc}") from exc
+            self.config.device = None
+            try:
+                self._stream = sd.InputStream(
+                    samplerate=self.config.sample_rate,
+                    channels=self.config.channels,
+                    dtype="float32",
+                    callback=callback,
+                )
+                self._stream.start()
+                device_lines = "\n".join(available) if available else "未检测到可用输入设备。"
+                self._last_warning = (
+                    "指定录音设备不可用，已切换为系统默认设备。\n"
+                    "如果仍然无声，请在配置文件中调整 recording.device。\n"
+                    f"可用输入设备：\n{device_lines}"
+                )
+            except (sd.PortAudioError, ValueError) as fallback_exc:
+                device_lines = "\n".join(available) if available else "未检测到可用输入设备。"
+                raise RecorderError(
+                    "无法连接指定录音设备，并且回退到系统默认设备失败。\n"
+                    f"原始错误：{exc}\n"
+                    f"回退错误：{fallback_exc}\n"
+                    f"请确认麦克风连接，或从以下设备中选择有效索引：\n{device_lines}"
+                ) from fallback_exc
         self._stream = sd.InputStream(
             samplerate=self.config.sample_rate,
             channels=self.config.channels,
@@ -168,6 +206,27 @@ class AudioRecorder:
         with markers_file.open("w", encoding="utf-8") as f:
             json.dump(markers_data, f, ensure_ascii=False, indent=2)
         return markers_file
+
+    def pop_last_warning(self) -> Optional[str]:
+        """Return the last warning (if any) and clear it."""
+
+        warning = self._last_warning
+        self._last_warning = None
+        return warning
+
+    @staticmethod
+    def list_input_devices() -> List[str]:
+        """Enumerate available input devices for display."""
+
+        try:
+            devices = sd.query_devices()
+        except sd.PortAudioError:
+            return []
+        entries: List[str] = []
+        for index, device in enumerate(devices):
+            if device.get("max_input_channels", 0) > 0:
+                entries.append(f"{index}: {device['name']}")
+        return entries
 
 
 def build_recorder(config: dict, base_path: Path) -> AudioRecorder:

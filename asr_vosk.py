@@ -4,9 +4,17 @@ from __future__ import annotations
 import json
 import wave
 from pathlib import Path
+from typing import Dict, Iterable, List, Protocol
 from typing import Dict, Iterable, List
 
 from vosk import KaldiRecognizer, Model  # type: ignore
+
+
+class ASRBackend(Protocol):
+    """Protocol representing the transcription interface required by the app."""
+
+    def transcribe_files(self, audio_files: Iterable[Path]) -> str:
+        ...
 
 
 class ASRModel:
@@ -60,6 +68,36 @@ class ASRModel:
         return "\n".join(transcripts)
 
 
+def build_asr(config: dict, base_path: Path) -> ASRBackend:
+    asr_cfg = config["asr"]
+    recording_cfg = config["recording"]
+    engine = asr_cfg.get("engine", "vosk").lower()
+    model_path = base_path / asr_cfg["model_path"]
+
+    if engine == "vosk":
+        return ASRModel(
+            model_dir=model_path,
+            sample_rate=recording_cfg["sample_rate"],
+            max_alternatives=asr_cfg.get("max_alternatives", 0),
+            words=asr_cfg.get("words", True),
+        )
+
+    if engine in {"faster-whisper", "whisper"}:
+        try:
+            from advanced.asr_fwhisper import FasterWhisperASRModel
+        except ImportError as exc:
+            raise RuntimeError(
+                "未安装 faster-whisper 组件。请参阅 README 的 Advanced 部分安装 advanced/requirements-advanced.txt 中的依赖。"
+            ) from exc
+
+        return FasterWhisperASRModel(
+            model_path=model_path,
+            compute_type=asr_cfg.get("compute_type", "auto"),
+            vad_filter=asr_cfg.get("vad_filter", True),
+            beam_size=asr_cfg.get("beam_size", 5),
+        )
+
+    raise ValueError(f"不支持的 ASR 引擎：{engine}")
 def build_asr(config: dict, base_path: Path) -> ASRModel:
     asr_cfg = config["asr"]
     recording_cfg = config["recording"]

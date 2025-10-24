@@ -19,6 +19,9 @@ paths:
   policy_source_dir: policy_source
   policy_db_dir: policy_db
   models_dir: models
+
+asr:
+  engine: vosk                      # 识别引擎，默认使用 Vosk
   sdelete_path: bin/sdelete64.exe
 
 asr:
@@ -39,6 +42,14 @@ policy:
   snippet_length: 200
   top_k: 5
 
+secure_delete:
+  mode: sdelete              # 可选：sdelete / standard
+  sdelete_path: bin/sdelete64.exe
+  overwrite_passes: 1        # SDelete 覆盖次数
+  fallback_message: "未检测到 SDelete，已使用普通删除。建议启用 BitLocker/全盘加密。"
+
+logging:
+  log_file: null             # 若需记录操作日志，请填写路径；默认为空表示不记录
 security:
   overwrite_passes: 1      # SDelete 覆盖次数
   log_file: null           # 若需记录操作日志，请填写路径；默认为空表示不记录

@@ -28,6 +28,20 @@ jobs:
       - name: Build executable
         shell: pwsh
         run: |
+          $args = @(
+            "--noconfirm",
+            "--clean",
+            "--name",
+            "LocalMeetingBot",
+            "--noconsole",
+            "--add-data",
+            "config.yaml;."
+          )
+          if (Test-Path models)    { $args += @("--add-data", "models;models") }
+          if (Test-Path policy_db) { $args += @("--add-data", "policy_db;policy_db") }
+          if (Test-Path bin)       { $args += @("--add-data", "bin;bin") }
+          $args += "app.py"
+          pyinstaller @args
           pyinstaller --noconfirm --clean --name LocalMeetingBot `
             --noconsole `
             --add-data "config.yaml;." `
