@@ -262,6 +262,14 @@ class OfflineMeetingApp:
                 self.log(warning.replace("\n", " / "))
                 sg.popup_ok(warning)
         except RecorderError as exc:
+            device_lines = self._list_input_devices()
+            message = str(exc)
+            if device_lines:
+                message = f"{message}\n\n可用输入设备：\n" + "\n".join(device_lines)
+            else:
+                message = f"{message}\n\n未检测到可用输入设备，请检查麦克风连接。"
+            self.log(message.replace("\n", " "))
+            sg.popup_error(message)
             sg.popup_error(str(exc))
 
     def handle_mark(self) -> None:
@@ -464,6 +472,30 @@ class OfflineMeetingApp:
                 else "责任人词典：未加载"
             )
             self.window["contact_status"].update(status_text)
+
+    def _list_input_devices(self) -> List[str]:
+        try:
+            import sounddevice as sd  # type: ignore import
+        except Exception as exc:
+            self.log(f"录音设备自检失败：{exc}")
+            return []
+        try:
+            devices = sd.query_devices()
+        except Exception as exc:
+            self.log(f"无法查询音频设备：{exc}")
+            return []
+        lines: List[str] = []
+        for index, dev in enumerate(devices):
+            max_input = int(dev.get("max_input_channels", 0))
+            if max_input <= 0:
+                continue
+            name = dev.get("name", "未知设备")
+            host_idx = dev.get("hostapi")
+            host_label = ""
+            if host_idx is not None:
+                host_label = f" / HostAPI {host_idx}"
+            lines.append(f"[{index}] {name}{host_label}（输入通道：{max_input}）")
+        return lines
 
     def _update_asr_status(self) -> None:
         if self.window and "asr_status" in self.window.AllKeysDict:
