@@ -1,0 +1,45 @@
+name: windows-web-bundle
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch: {}
+
+jobs:
+  bundle:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Prepare bundle folder
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path web_bundle | Out-Null
+          $dirs = @("models","bin","policy_db","policy_source","audio_in","transcripts","summaries","minutes","markers")
+          foreach ($d in $dirs) {
+            New-Item -ItemType Directory -Force -Path "web_bundle\$d" | Out-Null
+            New-Item -ItemType File -Force -Path "web_bundle\$d\.gitkeep" | Out-Null
+          }
+
+          Copy-Item app_web.py web_bundle\ -Force
+          if (Test-Path requirements.txt) { Copy-Item requirements.txt web_bundle\ -Force }
+          if (Test-Path requirements-web.txt) { Copy-Item requirements-web.txt web_bundle\ -Force }
+          if (Test-Path config.yaml) { Copy-Item config.yaml web_bundle\ -Force }
+          if (Test-Path README_WEB.md) { Copy-Item README_WEB.md web_bundle\ -Force }
+
+          Copy-Item start_web.bat web_bundle\ -Force
+          Copy-Item start_web.ps1 web_bundle\ -Force
+
+      - name: Zip artifact
+        shell: pwsh
+        run: |
+          Compress-Archive -Path web_bundle\* -DestinationPath OfflineWebBundle_win.zip -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OfflineWebBundle_win
+          path: OfflineWebBundle_win.zip
