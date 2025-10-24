@@ -1,6 +1,13 @@
 """Summarization and action item extraction utilities."""
 from __future__ import annotations
 
+import csv
+import json
+import re
+from dataclasses import dataclass
+from difflib import get_close_matches
+from pathlib import Path
+from typing import Iterable, List, Optional
 import json
 import re
 from dataclasses import dataclass
@@ -10,6 +17,7 @@ from typing import Iterable, List
 from textrank4zh import TextRank4Sentence  # type: ignore
 
 ACTION_PATTERN = re.compile(
+    r"(?P<who>[\u4e00-\u9fa5A-Za-z0-9·\-]{1,8})[^\u4e00-\u9fa5A-Za-z0-9]{0,3}(负责|完成|落实|推进|跟进|执行)"
     r"(?P<who>[\u4e00-\u9fa5A-Za-z0-9]+)[^\u4e00-\u9fa5A-Za-z0-9]{0,3}(负责|完成|落实|推进|跟进)"
     r"(?P<what>[^。；，,.]*?)"
     r"(于|在)(?P<when>[^。；，,.]*(\d{4}-\d{2}-\d{2}|本周|下周|月底|尽快))",
@@ -26,6 +34,56 @@ class ActionItem:
         return {"who": self.who, "what": self.what, "when": self.when}
 
 
+class PersonDictionary:
+    """Load and resolve person names from a contact CSV file."""
+
+    def __init__(self, csv_path: Optional[Path]) -> None:
+        self.names: List[str] = []
+        if csv_path and csv_path.exists():
+            self.names = self._load_names(csv_path)
+
+    @staticmethod
+    def _load_names(csv_path: Path) -> List[str]:
+        names: List[str] = []
+        with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            if reader.fieldnames:
+                name_key = "name" if "name" in reader.fieldnames else reader.fieldnames[0]
+                for row in reader:
+                    value = (row.get(name_key) or "").strip()
+                    if value:
+                        names.append(value)
+            else:
+                f.seek(0)
+                for line in f:
+                    value = line.strip()
+                    if value:
+                        names.append(value)
+        # 去重并按长度排序，长名称优先匹配
+        unique = sorted(set(names), key=lambda item: (-len(item), item))
+        return unique
+
+    def resolve(self, candidate_text: str) -> Optional[str]:
+        if not self.names:
+            return None
+        for name in self.names:
+            if name in candidate_text:
+                return name
+        matches = get_close_matches(candidate_text.strip(), self.names, n=1, cutoff=0.7)
+        return matches[0] if matches else None
+
+    @property
+    def loaded(self) -> bool:
+        return bool(self.names)
+
+
+class SummaryBuilder:
+    """Create quick and proofreading summaries."""
+
+    def __init__(self, summary_dir: Path, person_dict: PersonDictionary) -> None:
+        self.summary_dir = summary_dir
+        self.summary_dir.mkdir(parents=True, exist_ok=True)
+        self.person_dict = person_dict
 class SummaryBuilder:
     """Create quick and proofreading summaries."""
 
@@ -47,6 +105,10 @@ class SummaryBuilder:
         return output_path
 
     def _save_action_items(self, notes: List[str]) -> Path:
+        items = [
+            item.to_dict()
+            for item in extract_action_items("\n".join(notes), person_dict=self.person_dict)
+        ]
         items = [item.to_dict() for item in extract_action_items("\n".join(notes))]
         action_path = self.summary_dir / "actions.json"
         action_path.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -100,6 +162,14 @@ class SummaryBuilder:
         return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
+def extract_action_items(text: str, person_dict: Optional[PersonDictionary] = None) -> List[ActionItem]:
+    matches: List[ActionItem] = []
+    for match in ACTION_PATTERN.finditer(text):
+        candidate = match.group("who")
+        resolved = None
+        if person_dict:
+            resolved = person_dict.resolve(match.group(0))
+        who = resolved or candidate
 def extract_action_items(text: str) -> List[ActionItem]:
     matches: List[ActionItem] = []
     for match in ACTION_PATTERN.finditer(text):
@@ -116,4 +186,8 @@ def load_text(path: Path) -> str:
 
 def build_summarizer(config: dict, base_path: Path) -> SummaryBuilder:
     summary_dir = base_path / config["paths"]["summary_dir"]
+    contact_csv = config["summary"].get("contact_csv")
+    contact_path = base_path / contact_csv if contact_csv else None
+    person_dict = PersonDictionary(contact_path)
+    return SummaryBuilder(summary_dir, person_dict)
     return SummaryBuilder(summary_dir)

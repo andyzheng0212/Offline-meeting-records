@@ -31,6 +31,8 @@ summary:
   proofreading_prefix: sum_
   diff_prefix: diff_
   action_items_filename: actions.json
+  contact_csv: contacts/contacts.csv   # 科室通讯录（CSV），列名含 name 或第一列为姓名
+  default_template: 通用              # 导出纪要默认模板：通用/党委会/项目会/招采会
 
 policy:
   database_name: policy.db

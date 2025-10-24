@@ -32,6 +32,7 @@ class OfflineMeetingApp:
         self.config = self._load_config(config_path)
         self.recorder: AudioRecorder = build_recorder(self.config, self.base_path)
         self.summarizer: SummaryBuilder = build_summarizer(self.config, self.base_path)
+        self.person_dict = self.summarizer.person_dict
         self.destroyer: Destroyer = build_destroyer(self.config, self.base_path)
         self.policy_db: PolicyDatabase = build_policy_db(self.config, self.base_path)
         self.window: Optional[sg.Window] = None
@@ -49,6 +50,133 @@ class OfflineMeetingApp:
         return yaml.safe_load(path.read_text(encoding="utf-8"))
 
     def run(self) -> None:
+        sg.theme("DarkBlue3")
+
+        info_frame = sg.Frame(
+            "会议信息",
+            [
+                [
+                    sg.Text("会议标题", size=(8, 1)),
+                    sg.Input(key="title", expand_x=True),
+                    sg.Text("会议主题", size=(8, 1)),
+                    sg.Input(key="topic", expand_x=True),
+                ],
+                [
+                    sg.Text("时间地点", size=(8, 1)),
+                    sg.Input(key="time_place", expand_x=True),
+                    sg.Text("主持人", size=(8, 1)),
+                    sg.Input(key="host", expand_x=True),
+                ],
+                [
+                    sg.Text("记录人", size=(8, 1)),
+                    sg.Input(key="recorder", expand_x=True),
+                    sg.Text("与会人员", size=(8, 1)),
+                    sg.Input(key="participants", expand_x=True),
+                ],
+            ],
+            expand_x=True,
+        )
+
+        tab_notes = [
+            [
+                sg.Text("要点条目（每行一条）", font=("Microsoft YaHei", 11, "bold")),
+                sg.Text(
+                    f"责任人词典：{'已加载' if self.person_dict.loaded else '未加载'}",
+                    key="contact_status",
+                    text_color="#F7F7F7",
+                ),
+            ],
+            [
+                sg.Multiline(
+                    key="notes",
+                    size=(80, 12),
+                    expand_x=True,
+                    expand_y=True,
+                    tooltip="请输入会议要点，每行一条，生成快速版纪要。",
+                )
+            ],
+            [
+                sg.Button("生成快速版", size=(14, 1), button_color=("white", "#1E88E5")),
+                sg.Button("查看行动项", key="查看行动项", size=(14, 1)),
+            ],
+        ]
+
+        tab_record = [
+            [
+                sg.Button("开始录音", size=(12, 1), button_color=("white", "#43A047")),
+                sg.Button("标记重点", size=(12, 1)),
+                sg.Button("停止录音", size=(12, 1), button_color=("white", "#E53935")),
+            ],
+            [
+                sg.Button("录音校对", size=(12, 1), button_color=("white", "#8E24AA")),
+                sg.Text("ASR 状态："),
+                sg.Text(
+                    "已就绪" if self.asr else "未加载",
+                    key="asr_status",
+                    text_color="#FFEB3B" if not self.asr else "#C5E1A5",
+                ),
+            ],
+        ]
+
+        template_options = ["通用", "党委会", "项目会", "招采会"]
+        default_template = self.config["summary"].get("default_template", "通用")
+        if default_template not in template_options:
+            default_template = "通用"
+        tab_policy = [
+            [
+                sg.Button("导入政策库", size=(14, 1)),
+                sg.Button("政策对照", size=(14, 1)),
+                sg.Button("一键销毁", size=(14, 1)),
+            ],
+            [
+                sg.Text("纪要模板"),
+                sg.Combo(
+                    template_options,
+                    default_value=default_template,
+                    key="template_choice",
+                    readonly=True,
+                    size=(15, 1),
+                ),
+                sg.Button("导出纪要", size=(14, 1), button_color=("white", "#3949AB")),
+            ],
+        ]
+
+        tab_group = sg.TabGroup(
+            [
+                [
+                    sg.Tab("纪要撰写", tab_notes, key="tab_notes"),
+                    sg.Tab("录音与校对", tab_record, key="tab_record"),
+                    sg.Tab("制度与导出", tab_policy, key="tab_policy"),
+                ]
+            ],
+            expand_x=True,
+            expand_y=True,
+        )
+
+        log_frame = sg.Frame(
+            "系统消息",
+            [[sg.Multiline(key="log", size=(100, 10), disabled=True, autoscroll=True, expand_x=True, expand_y=True)]],
+            expand_x=True,
+            expand_y=True,
+        )
+
+        layout = [
+            [sg.Text("Offline Meeting Records", font=("Microsoft YaHei", 16, "bold"))],
+            [info_frame],
+            [tab_group],
+            [log_frame],
+            [sg.StatusBar("就绪", key="status_bar", size=(60, 1))],
+        ]
+
+        window = sg.Window(
+            "Offline Meeting Records",
+            layout,
+            finalize=True,
+            resizable=True,
+            element_justification="left",
+        )
+        self.window = window
+        self._refresh_contact_status()
         sg.theme("SystemDefault")
         layout = [
             [sg.Text("会议标题"), sg.Input(key="title", size=(25, 1)), sg.Text("会议主题"), sg.Input(key="topic", size=(25, 1))],
@@ -85,6 +213,8 @@ class OfflineMeetingApp:
                     self.handle_stop_recording()
                 elif event == "生成快速版":
                     self.handle_quick_summary(values.get("notes", ""))
+                elif event == "查看行动项":
+                    self.handle_view_actions()
                 elif event == "录音校对":
                     self.handle_proofreading()
                 elif event == "导入政策库":
@@ -106,6 +236,7 @@ class OfflineMeetingApp:
             session_id = self.recorder.start()
             self.log(f"录音开始，会话 {session_id}")
             sg.popup("录音已开始。")
+            self.set_status("录音进行中…")
         except RecorderError as exc:
             sg.popup_error(str(exc))
 
@@ -125,6 +256,7 @@ class OfflineMeetingApp:
             self.log(f"录音已停止，标记保存在 {markers_path.name}")
             sg.popup("录音已停止。")
             self._enforce_retention()
+            self.set_status("录音已完成。")
         except RecorderError as exc:
             sg.popup_error(str(exc))
 
@@ -134,6 +266,7 @@ class OfflineMeetingApp:
         self.state.quick_summary_path = output
         self.log(f"快速版纪要已生成：{output.name}")
         sg.popup("快速版纪要已生成。")
+        self.set_status("快速版纪要已生成。")
 
     def handle_proofreading(self) -> None:
         if not self.asr:
@@ -160,6 +293,7 @@ class OfflineMeetingApp:
         self.log("录音校对完成，已生成摘要与差异报告。")
         sg.popup("录音校对完成。")
         self._enforce_retention()
+        self.set_status("录音校对完成。")
 
     def _write_transcript(self, text: str) -> Path:
         transcript_dir = self.base_path / self.paths["transcript_dir"]
@@ -192,6 +326,7 @@ class OfflineMeetingApp:
         self.state.policy_results = results
         self.log(f"政策对照提示 {len(results)} 条，仅供参考。")
         sg.popup(f"已匹配到 {len(results)} 条制度提示，注意：仅提示，不构成合规结论。")
+        self.set_status("政策对照完成。")
 
     def _extract_query_lines(self, content: str) -> List[str]:
         return [line.lstrip("- ") for line in content.splitlines() if line.startswith("-")]
@@ -220,6 +355,9 @@ class OfflineMeetingApp:
             "recorder": values.get("recorder", ""),
             "participants": values.get("participants", ""),
         }
+        template_choice = values.get("template_choice") or self.config["summary"].get(
+            "default_template", "通用"
+        )
         create_minutes_document(
             output_path=output_path,
             meeting_info=meeting_info,
@@ -228,6 +366,11 @@ class OfflineMeetingApp:
             diff_content=diff_content if diff_content else None,
             action_items=action_items,
             policy_suggestions=self.state.policy_results,
+            template_name=template_choice,
+        )
+        self.log(f"纪要已导出：{output_path.name}")
+        sg.popup("纪要已导出。")
+        self.set_status(f"纪要已导出（模板：{template_choice}）。")
         )
         self.log(f"纪要已导出：{output_path.name}")
         sg.popup("纪要已导出。")
@@ -237,6 +380,29 @@ class OfflineMeetingApp:
         self.destroyer.destroy(include_minutes=include_minutes)
         self.log("一键销毁完成。")
         sg.popup("指定目录已清理。")
+        self.set_status("一键销毁完成。")
+
+    def handle_view_actions(self) -> None:
+        action_path = self.summarizer.summary_dir / self.summary_cfg["action_items_filename"]
+        items = load_action_items(action_path)
+        if not items:
+            sg.popup("暂无行动项，先录入要点或生成快速版。")
+            return
+        lines = [f"责任人：{item['who']}\n事项：{item['what']}\n时间：{item['when']}" for item in items]
+        sg.popup_scrolled("\n\n".join(lines), title="行动项清单", size=(60, 10))
+
+    def set_status(self, message: str) -> None:
+        if self.window and "status_bar" in self.window.AllKeysDict:
+            self.window["status_bar"].update(value=message)
+
+    def _refresh_contact_status(self) -> None:
+        if self.window and "contact_status" in self.window.AllKeysDict:
+            status_text = (
+                f"责任人词典：共 {len(self.person_dict.names)} 人"
+                if self.person_dict.loaded
+                else "责任人词典：未加载"
+            )
+            self.window["contact_status"].update(status_text)
 
     def _enforce_retention(self) -> None:
         self._cleanup_by_days(self.base_path / self.paths["audio_dir"], self.storage_cfg.get("retain_audio_days", -1))

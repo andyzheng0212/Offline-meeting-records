@@ -14,6 +14,7 @@ build/
 # Models and binaries
 models/
 bin/sdelete64.exe
+contacts/
 
 # Runtime generated directories
 audio_in/

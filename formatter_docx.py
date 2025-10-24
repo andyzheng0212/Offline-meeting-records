@@ -9,6 +9,50 @@ from docx import Document  # type: ignore
 from docx.shared import Pt
 
 
+TEMPLATE_PRESETS = {
+    "通用": {
+        "title_suffix": "会议纪要",
+        "summary_heading": "议题要点",
+        "summary_intro": None,
+        "diff_heading": "录音校对差异",
+        "action_heading": "行动项清单",
+        "action_headers": ["责任人", "事项", "时间节点"],
+        "policy_heading": "制度提示表",
+        "policy_headers": ["制度标题", "条款", "来源", "摘要"],
+    },
+    "党委会": {
+        "title_suffix": "党委会纪要",
+        "summary_heading": "党委会议题概览",
+        "summary_intro": "聚焦党委会重点议题，以下内容仅提示内部学习使用。",
+        "diff_heading": "会议记录差异提醒",
+        "action_heading": "整改/落实清单",
+        "action_headers": ["责任部门", "整改事项", "时限要求"],
+        "policy_heading": "党内制度提示",
+        "policy_headers": ["制度名称", "条款号", "来源", "提示摘要"],
+    },
+    "项目会": {
+        "title_suffix": "项目推进纪要",
+        "summary_heading": "项目推进要点",
+        "summary_intro": "以下为项目里程碑及关键讨论摘要。",
+        "diff_heading": "会议记录核对",
+        "action_heading": "项目行动项",
+        "action_headers": ["责任人", "任务内容", "完成时间"],
+        "policy_heading": "项目制度提示",
+        "policy_headers": ["制度标题", "条款", "来源", "提示摘要"],
+    },
+    "招采会": {
+        "title_suffix": "招采会议纪要",
+        "summary_heading": "采购议题要点",
+        "summary_intro": "重点关注合规流程与供应商议题，以下提示仅供参考。",
+        "diff_heading": "录音核对差异",
+        "action_heading": "采购执行清单",
+        "action_headers": ["责任岗位", "执行事项", "完成时限"],
+        "policy_heading": "招采制度提示",
+        "policy_headers": ["制度名称", "条款", "来源", "提示摘要"],
+    },
+}
+
+
 def _add_heading(document: Document, text: str, level: int = 1) -> None:
     paragraph = document.add_heading(level=level)
     run = paragraph.add_run(text)
@@ -36,6 +80,18 @@ def create_minutes_document(
     diff_content: Optional[str],
     action_items: List[Dict[str, str]],
     policy_suggestions: List[Dict[str, str]],
+    template_name: str = "通用",
+) -> Path:
+    template = TEMPLATE_PRESETS.get(template_name, TEMPLATE_PRESETS["通用"])
+    document = Document()
+    document.styles["Normal"].font.size = Pt(11)
+
+    base_title = meeting_info.get("title") or template["title_suffix"]
+    if template_name != "通用" and template["title_suffix"] not in base_title:
+        title_text = f"{base_title}（{template['title_suffix']}）"
+    else:
+        title_text = base_title
+    document.add_heading(title_text, level=0)
 ) -> Path:
     document = Document()
     document.styles["Normal"].font.size = Pt(11)
@@ -52,6 +108,9 @@ def create_minutes_document(
     for key, value in base_fields:
         _add_kv_paragraph(document, key, value)
 
+    _add_heading(document, template["summary_heading"], level=1)
+    if template.get("summary_intro"):
+        document.add_paragraph(template["summary_intro"] or "")
     _add_heading(document, "议题要点", level=1)
     document.add_paragraph(summary_title, style=None)
     for line in summary_content.splitlines():
@@ -61,6 +120,7 @@ def create_minutes_document(
             document.add_paragraph(line.strip())
 
     if diff_content:
+        _add_heading(document, template["diff_heading"], level=1)
         _add_heading(document, "录音校对差异", level=1)
         for line in diff_content.splitlines():
             if line.startswith("##"):
@@ -72,6 +132,11 @@ def create_minutes_document(
             elif line.strip():
                 document.add_paragraph(line.strip())
 
+    _add_heading(document, template["action_heading"], level=1)
+    if action_items:
+        table = document.add_table(rows=1, cols=3)
+        header_cells = table.rows[0].cells
+        headers = template["action_headers"]
     _add_heading(document, "行动项清单", level=1)
     if action_items:
         table = document.add_table(rows=1, cols=3)
@@ -89,11 +154,13 @@ def create_minutes_document(
     else:
         document.add_paragraph("暂无行动项。")
 
+    _add_heading(document, template["policy_heading"], level=1)
     _add_heading(document, "制度提示表", level=1)
     document.add_paragraph("以下提示仅供参考，不构成合规结论。")
     if policy_suggestions:
         table = document.add_table(rows=1, cols=4)
         header_cells = table.rows[0].cells
+        headers = template["policy_headers"]
         headers = ["制度标题", "条款", "来源", "摘要"]
         for cell, text in zip(header_cells, headers):
             paragraph = cell.paragraphs[0]
