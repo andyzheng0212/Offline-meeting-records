@@ -10,6 +10,7 @@ import PySimpleGUI as sg
 import yaml
 
 from asr_vosk import ASRBackend, build_asr
+from asr_vosk import ASRModel, build_asr
 from destroyer import Destroyer, build_destroyer
 from formatter_docx import create_minutes_document, load_action_items
 from policy_db import PolicyDatabase, build_policy_db
@@ -49,6 +50,11 @@ class OfflineMeetingApp:
             except Exception as exc:  # Model issues
                 self.pending_warnings.append(f"Vosk 模型加载失败：{exc}")
                 self.asr = None
+        try:
+            self.asr: Optional[ASRModel] = build_asr(self.config, self.base_path)
+        except Exception as exc:  # Model missing etc.
+            sg.popup_error(f"Vosk 模型加载失败：{exc}")
+            self.asr = None
         self.state = AppState()
         self.paths = self.config["paths"]
         self.summary_cfg = self.config["summary"]
@@ -123,6 +129,9 @@ class OfflineMeetingApp:
                     asr_text,
                     key="asr_status",
                     text_color=asr_color,
+                    "已就绪" if self.asr else "未加载",
+                    key="asr_status",
+                    text_color="#FFEB3B" if not self.asr else "#C5E1A5",
                 ),
             ],
         ]
@@ -188,6 +197,27 @@ class OfflineMeetingApp:
         self._refresh_contact_status()
         self._update_asr_status()
         self._show_startup_warnings()
+        sg.theme("SystemDefault")
+        layout = [
+            [sg.Text("会议标题"), sg.Input(key="title", size=(25, 1)), sg.Text("会议主题"), sg.Input(key="topic", size=(25, 1))],
+            [sg.Text("时间地点"), sg.Input(key="time_place", size=(25, 1)), sg.Text("主持人"), sg.Input(key="host", size=(25, 1))],
+            [sg.Text("记录人"), sg.Input(key="recorder", size=(25, 1)), sg.Text("与会人员"), sg.Input(key="participants", size=(25, 1))],
+            [sg.Text("要点条目 (每行一条)"), sg.Multiline(key="notes", size=(80, 8))],
+            [
+                sg.Button("开始录音"),
+                sg.Button("标记重点"),
+                sg.Button("停止录音"),
+                sg.Button("生成快速版"),
+                sg.Button("录音校对"),
+                sg.Button("导入政策库"),
+                sg.Button("政策对照"),
+                sg.Button("导出纪要"),
+                sg.Button("一键销毁"),
+            ],
+            [sg.Multiline(key="log", size=(100, 12), disabled=True, autoscroll=True)],
+        ]
+        window = sg.Window("Offline Meeting Records", layout, finalize=True, resizable=True)
+        self.window = window
         while True:
             event, values = window.read(timeout=500)
             if event == sg.WIN_CLOSED:
@@ -265,6 +295,8 @@ class OfflineMeetingApp:
     def handle_proofreading(self) -> None:
         if not self._ensure_asr():
             return
+        if not self.asr:
+            raise RuntimeError("Vosk 模型未准备，无法进行录音校对。")
         audio_dir = self.base_path / self.paths["audio_dir"]
         wav_files = sorted(audio_dir.glob("*.wav"))
         if not wav_files:
@@ -344,6 +376,7 @@ class OfflineMeetingApp:
         output_path = minutes_dir / filename
         has_proof = self.state.proofreading_path and self.state.proofreading_path.exists()
         summary_title = "录音校对定稿" if has_proof else "快速版纪要"
+        summary_title = "快速版纪要" if self.state.quick_summary_path else "录音校对摘要"
         summary_content = ""
         if self.state.proofreading_path and self.state.proofreading_path.exists():
             summary_content = load_text(self.state.proofreading_path)
@@ -399,6 +432,15 @@ class OfflineMeetingApp:
             self.log(fallback_message)
         self.log("一键销毁完成。")
         sg.popup("\n".join(message_lines))
+        )
+        self.log(f"纪要已导出：{output_path.name}")
+        sg.popup("纪要已导出。")
+
+    def handle_destroy(self) -> None:
+        include_minutes = sg.popup_yes_no("是否连同纪要一并销毁？") == "Yes"
+        self.destroyer.destroy(include_minutes=include_minutes)
+        self.log("一键销毁完成。")
+        sg.popup("指定目录已清理。")
         self.set_status("一键销毁完成。")
 
     def handle_view_actions(self) -> None:

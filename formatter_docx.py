@@ -92,6 +92,11 @@ def create_minutes_document(
     else:
         title_text = base_title
     document.add_heading(title_text, level=0)
+) -> Path:
+    document = Document()
+    document.styles["Normal"].font.size = Pt(11)
+
+    document.add_heading(meeting_info.get("title", "会议纪要"), level=0)
 
     base_fields = [
         ("会议主题", meeting_info.get("topic", "")),
@@ -106,6 +111,7 @@ def create_minutes_document(
     _add_heading(document, template["summary_heading"], level=1)
     if template.get("summary_intro"):
         document.add_paragraph(template["summary_intro"] or "")
+    _add_heading(document, "议题要点", level=1)
     document.add_paragraph(summary_title, style=None)
     for line in summary_content.splitlines():
         if line.startswith("-"):
@@ -115,6 +121,7 @@ def create_minutes_document(
 
     if diff_content:
         _add_heading(document, template["diff_heading"], level=1)
+        _add_heading(document, "录音校对差异", level=1)
         for line in diff_content.splitlines():
             if line.startswith("##"):
                 paragraph = document.add_paragraph()
@@ -130,6 +137,11 @@ def create_minutes_document(
         table = document.add_table(rows=1, cols=3)
         header_cells = table.rows[0].cells
         headers = template["action_headers"]
+    _add_heading(document, "行动项清单", level=1)
+    if action_items:
+        table = document.add_table(rows=1, cols=3)
+        header_cells = table.rows[0].cells
+        headers = ["责任人", "事项", "时间节点"]
         for cell, text in zip(header_cells, headers):
             paragraph = cell.paragraphs[0]
             run = paragraph.add_run(text)
@@ -143,11 +155,13 @@ def create_minutes_document(
         document.add_paragraph("暂无行动项。")
 
     _add_heading(document, template["policy_heading"], level=1)
+    _add_heading(document, "制度提示表", level=1)
     document.add_paragraph("以下提示仅供参考，不构成合规结论。")
     if policy_suggestions:
         table = document.add_table(rows=1, cols=4)
         header_cells = table.rows[0].cells
         headers = template["policy_headers"]
+        headers = ["制度标题", "条款", "来源", "摘要"]
         for cell, text in zip(header_cells, headers):
             paragraph = cell.paragraphs[0]
             run = paragraph.add_run(text)

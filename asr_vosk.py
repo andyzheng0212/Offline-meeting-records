@@ -5,6 +5,7 @@ import json
 import wave
 from pathlib import Path
 from typing import Dict, Iterable, List, Protocol
+from typing import Dict, Iterable, List
 
 from vosk import KaldiRecognizer, Model  # type: ignore
 
@@ -97,3 +98,13 @@ def build_asr(config: dict, base_path: Path) -> ASRBackend:
         )
 
     raise ValueError(f"不支持的 ASR 引擎：{engine}")
+def build_asr(config: dict, base_path: Path) -> ASRModel:
+    asr_cfg = config["asr"]
+    recording_cfg = config["recording"]
+    model_path = base_path / asr_cfg["model_path"]
+    return ASRModel(
+        model_dir=model_path,
+        sample_rate=recording_cfg["sample_rate"],
+        max_alternatives=asr_cfg.get("max_alternatives", 0),
+        words=asr_cfg.get("words", True),
+    )
