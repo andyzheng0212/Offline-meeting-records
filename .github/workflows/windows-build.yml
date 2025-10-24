@@ -1,0 +1,49 @@
+name: Windows Build
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+      - name: Prepare data directories
+        run: |
+          New-Item -ItemType Directory -Force -Path models | Out-Null
+          New-Item -ItemType Directory -Force -Path policy_db | Out-Null
+          New-Item -ItemType Directory -Force -Path bin | Out-Null
+      - name: Build executable
+        shell: pwsh
+        run: |
+          $args = @(
+            "--noconfirm",
+            "--clean",
+            "--name",
+            "LocalMeetingBot",
+            "--noconsole",
+            "--add-data",
+            "config.yaml;."
+          )
+          if (Test-Path models)    { $args += @("--add-data", "models;models") }
+          if (Test-Path policy_db) { $args += @("--add-data", "policy_db;policy_db") }
+          if (Test-Path bin)       { $args += @("--add-data", "bin;bin") }
+          $args += "app.py"
+          pyinstaller @args
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocalMeetingBot_win
+          path: dist/LocalMeetingBot/
