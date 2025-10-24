@@ -411,6 +411,11 @@ def main() -> None:
                 existed = getattr(item, "existed", False)
                 status = "已清理" if existed else "原本为空"
                 st.markdown(f"- {display_path} → {status}（模式：{mode}）")
+                path = item.path if hasattr(item, "path") else getattr(item, "path", None)
+                mode = getattr(item, "mode", "")
+                existed = getattr(item, "existed", False)
+                status = "已清理" if existed else "原本为空"
+                st.markdown(f"- {path} → {status}（模式：{mode}）")
             if result.get("fallback_used"):
                 st.warning(result.get("message") or "已使用普通删除，建议启用磁盘加密。")
             else:

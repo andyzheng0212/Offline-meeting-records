@@ -8,11 +8,17 @@ from dataclasses import dataclass
 from difflib import get_close_matches
 from pathlib import Path
 from typing import Iterable, List, Optional
+import json
+import re
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable, List
 
 from textrank4zh import TextRank4Sentence  # type: ignore
 
 ACTION_PATTERN = re.compile(
     r"(?P<who>[\u4e00-\u9fa5A-Za-z0-9·\-]{1,8})[^\u4e00-\u9fa5A-Za-z0-9]{0,3}(负责|完成|落实|推进|跟进|执行)"
+    r"(?P<who>[\u4e00-\u9fa5A-Za-z0-9]+)[^\u4e00-\u9fa5A-Za-z0-9]{0,3}(负责|完成|落实|推进|跟进)"
     r"(?P<what>[^。；，,.]*?)"
     r"(于|在)(?P<when>[^。；，,.]*(\d{4}-\d{2}-\d{2}|本周|下周|月底|尽快))",
 )
@@ -78,6 +84,12 @@ class SummaryBuilder:
         self.summary_dir = summary_dir
         self.summary_dir.mkdir(parents=True, exist_ok=True)
         self.person_dict = person_dict
+class SummaryBuilder:
+    """Create quick and proofreading summaries."""
+
+    def __init__(self, summary_dir: Path) -> None:
+        self.summary_dir = summary_dir
+        self.summary_dir.mkdir(parents=True, exist_ok=True)
 
     def generate_quick_summary(self, notes: Iterable[str], filename: str) -> Path:
         """Create a markdown quick summary from user provided notes."""
@@ -97,6 +109,7 @@ class SummaryBuilder:
             item.to_dict()
             for item in extract_action_items("\n".join(notes), person_dict=self.person_dict)
         ]
+        items = [item.to_dict() for item in extract_action_items("\n".join(notes))]
         action_path = self.summary_dir / "actions.json"
         action_path.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
         return action_path
@@ -157,6 +170,10 @@ def extract_action_items(text: str, person_dict: Optional[PersonDictionary] = No
         if person_dict:
             resolved = person_dict.resolve(match.group(0))
         who = resolved or candidate
+def extract_action_items(text: str) -> List[ActionItem]:
+    matches: List[ActionItem] = []
+    for match in ACTION_PATTERN.finditer(text):
+        who = match.group("who")
         what = match.group("what").strip()
         when = match.group("when")
         matches.append(ActionItem(who=who, what=what, when=when))
@@ -173,3 +190,4 @@ def build_summarizer(config: dict, base_path: Path) -> SummaryBuilder:
     contact_path = base_path / contact_csv if contact_csv else None
     person_dict = PersonDictionary(contact_path)
     return SummaryBuilder(summary_dir, person_dict)
+    return SummaryBuilder(summary_dir)

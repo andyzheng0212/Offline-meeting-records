@@ -120,6 +120,14 @@ class AudioRecorder:
                     f"回退错误：{fallback_exc}\n"
                     f"请确认麦克风连接，或从以下设备中选择有效索引：\n{device_lines}"
                 ) from fallback_exc
+        self._stream = sd.InputStream(
+            samplerate=self.config.sample_rate,
+            channels=self.config.channels,
+            dtype="float32",
+            callback=callback,
+            device=self.config.device,
+        )
+        self._stream.start()
 
         self._writer_thread = threading.Thread(target=self._writer_loop, daemon=True)
         self._writer_thread.start()

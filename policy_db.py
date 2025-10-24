@@ -58,6 +58,13 @@ class PolicyDatabase:
         except sqlite3.OperationalError:
             # FTS5 may be unavailable in some SQLite builds (e.g. custom/minimal builds)
             self.fts_available = False
+        cur.execute(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS policies_fts USING fts5(
+                title, section, content, content='policies', content_rowid='id'
+            )
+            """
+        )
         self.conn.commit()
 
     def close(self) -> None:
@@ -103,6 +110,23 @@ class PolicyDatabase:
         errors = list(self._last_errors)
         self._last_errors.clear()
         return errors
+
+        for file in files:
+            if file.suffix.lower() == ".pdf":
+                text = extract_text(str(file))
+            elif file.suffix.lower() == ".docx":
+                text = self._extract_docx(file)
+            else:
+                continue
+            entries.extend(self._split_sections(file.stem, file.name, text))
+        with self.conn:
+            self.conn.execute("DELETE FROM policies")
+            self.conn.execute("DELETE FROM policies_fts")
+            self.conn.executemany(
+                "INSERT INTO policies(title, section, source, content) VALUES (?, ?, ?, ?)", entries
+            )
+            self.conn.execute("INSERT INTO policies_fts(policies_fts) VALUES('rebuild')")
+        return len(entries)
 
     def _extract_docx(self, path: Path) -> str:
         doc = Document(str(path))
@@ -160,6 +184,13 @@ class PolicyDatabase:
                 "FROM policies WHERE content LIKE ? OR title LIKE ? OR section LIKE ? LIMIT ?",
                 (snippet_length, like_query, like_query, like_query, self.config.top_k),
             )
+        sql = (
+            "SELECT p.title, p.section, p.source, "
+            "snippet(policies_fts, 2, '[', ']', '...', ?) as snippet "
+            "FROM policies_fts JOIN policies p ON p.id = policies_fts.rowid "
+            "WHERE policies_fts MATCH ? LIMIT ?"
+        )
+        cursor = self.conn.execute(sql, (snippet_length, query, self.config.top_k))
         results = []
         for row in cursor.fetchall():
             results.append(

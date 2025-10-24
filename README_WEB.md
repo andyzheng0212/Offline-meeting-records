@@ -15,6 +15,7 @@
 3. 如需使用 SDelete 覆盖删除，请将 `sdelete64.exe` 放入 `bin/` 目录。
 4. **双击 `start_web.bat`**（或右键“使用 PowerShell 运行” `start_web.ps1`）。
 5. 首次运行脚本会自动创建 `.venv` 虚拟环境，并依次安装 `requirements.txt` 与 `requirements-web.txt`（脚本会优先尝试 `Python 3.14`，如未安装则回退到 `Python 3.x` 可用版本）。
+5. 首次运行脚本会自动创建 `.venv` 虚拟环境，并依次安装 `requirements.txt` 与 `requirements-web.txt`。
 6. 浏览器访问 [http://localhost:8501](http://localhost:8501)，开始离线使用 Web UI。
 
 > 若脚本提示找不到 Python，请安装 Python 3.10+ 并勾选“Add to PATH”。
