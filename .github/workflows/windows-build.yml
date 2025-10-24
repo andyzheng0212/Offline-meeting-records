@@ -20,6 +20,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
+      - name: Prepare data directories
+        run: |
+          New-Item -ItemType Directory -Force -Path models | Out-Null
+          New-Item -ItemType Directory -Force -Path policy_db | Out-Null
+          New-Item -ItemType Directory -Force -Path bin | Out-Null
+      - name: Build executable
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --name LocalMeetingBot `
+            --noconsole `
+            --add-data "config.yaml;." `
+            --add-data "models;models" `
+            --add-data "policy_db;policy_db" `
+            --add-data "bin;bin" `
       - name: Build executable
         run: |
           pyinstaller --noconfirm --clean --name OfflineMeetingRecords \
@@ -30,5 +44,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
+          name: LocalMeetingBot_win
+          path: dist/LocalMeetingBot/
           name: OfflineMeetingRecords
           path: dist/OfflineMeetingRecords/
