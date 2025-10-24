@@ -1,0 +1,42 @@
+# Offline Meeting Records configuration
+# 所有路径均为相对项目根目录的路径
+recording:
+  sample_rate: 16000        # 录音采样率 (Hz)
+  channels: 1               # 单声道录音
+  chunk_seconds: 600        # 每个音频切片时长 (秒)
+  device: null              # 指定录音设备索引，null 表示使用默认设备
+
+storage:
+  retain_audio_days: 0      # 音频保留天数 (0 表示生成纪要后立即删除)
+  retain_transcript_days: 7 # 转写文本默认保留天数
+
+paths:
+  audio_dir: audio_in
+  markers_dir: markers
+  transcript_dir: transcripts
+  summary_dir: summaries
+  minutes_dir: minutes
+  policy_source_dir: policy_source
+  policy_db_dir: policy_db
+  models_dir: models
+  sdelete_path: bin/sdelete64.exe
+
+asr:
+  model_path: models/vosk-model-cn  # 请自行下载 Vosk 中文模型并解压到该目录
+  max_alternatives: 0
+  words: true
+
+summary:
+  quick_filename: quick.md
+  proofreading_prefix: sum_
+  diff_prefix: diff_
+  action_items_filename: actions.json
+
+policy:
+  database_name: policy.db
+  snippet_length: 200
+  top_k: 5
+
+security:
+  overwrite_passes: 1      # SDelete 覆盖次数
+  log_file: null           # 若需记录操作日志，请填写路径；默认为空表示不记录

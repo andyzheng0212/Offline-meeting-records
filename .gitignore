@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+.env
+
+# Build artifacts
+dist/
+build/
+*.spec
+
+# Models and binaries
+models/
+bin/sdelete64.exe
+
+# Runtime generated directories
+audio_in/
+markers/
+transcripts/
+summaries/
+minutes/
+policy_db/
+
+# OS files
+.DS_Store
+Thumbs.db
