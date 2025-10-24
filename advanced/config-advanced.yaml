@@ -1,0 +1,50 @@
+# Advanced 模式示例配置：启用 faster-whisper 高精度识别
+# 使用前请先根据 README 提示准备模型目录，并将本文件覆盖根目录 config.yaml
+recording:
+  sample_rate: 16000
+  channels: 1
+  chunk_seconds: 600
+  device: null
+
+storage:
+  retain_audio_days: 0
+  retain_transcript_days: 7
+
+paths:
+  audio_dir: audio_in
+  markers_dir: markers
+  transcript_dir: transcripts
+  summary_dir: summaries
+  minutes_dir: minutes
+  policy_source_dir: policy_source
+  policy_db_dir: policy_db
+  models_dir: models
+
+asr:
+  engine: faster-whisper
+  model_path: models/faster-whisper-large-v2  # 将 faster-whisper 模型解压到该目录
+  compute_type: auto                          # 自动选择 GPU/CPU 精度
+  vad_filter: true                            # 默认启用 VAD，减少静音
+  beam_size: 5
+
+summary:
+  quick_filename: quick.md
+  proofreading_prefix: sum_
+  diff_prefix: diff_
+  action_items_filename: actions.json
+  contact_csv: contacts/contacts.csv
+  default_template: 通用
+
+policy:
+  database_name: policy.db
+  snippet_length: 200
+  top_k: 5
+
+secure_delete:
+  mode: sdelete
+  sdelete_path: bin/sdelete64.exe
+  overwrite_passes: 1
+  fallback_message: "未检测到 SDelete，已使用普通删除。建议启用 BitLocker/全盘加密。"
+
+logging:
+  log_file: null
