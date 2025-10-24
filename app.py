@@ -1,0 +1,281 @@
+"""Offline Meeting Records main GUI application."""
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import List, Optional
+
+import PySimpleGUI as sg
+import yaml
+
+from asr_vosk import ASRModel, build_asr
+from destroyer import Destroyer, build_destroyer
+from formatter_docx import create_minutes_document, load_action_items
+from policy_db import PolicyDatabase, build_policy_db
+from recorder import AudioRecorder, RecorderError, build_recorder
+from summarizer import SummaryBuilder, build_summarizer, load_text
+
+
+@dataclass
+class AppState:
+    quick_summary_path: Optional[Path] = None
+    proofreading_path: Optional[Path] = None
+    diff_path: Optional[Path] = None
+    transcript_path: Optional[Path] = None
+    policy_results: List[dict] = field(default_factory=list)
+
+
+class OfflineMeetingApp:
+    def __init__(self, config_path: Path) -> None:
+        self.base_path = config_path.parent
+        self.config = self._load_config(config_path)
+        self.recorder: AudioRecorder = build_recorder(self.config, self.base_path)
+        self.summarizer: SummaryBuilder = build_summarizer(self.config, self.base_path)
+        self.destroyer: Destroyer = build_destroyer(self.config, self.base_path)
+        self.policy_db: PolicyDatabase = build_policy_db(self.config, self.base_path)
+        self.window: Optional[sg.Window] = None
+        try:
+            self.asr: Optional[ASRModel] = build_asr(self.config, self.base_path)
+        except Exception as exc:  # Model missing etc.
+            sg.popup_error(f"Vosk 模型加载失败：{exc}")
+            self.asr = None
+        self.state = AppState()
+        self.paths = self.config["paths"]
+        self.summary_cfg = self.config["summary"]
+        self.storage_cfg = self.config["storage"]
+
+    def _load_config(self, path: Path) -> dict:
+        return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+    def run(self) -> None:
+        sg.theme("SystemDefault")
+        layout = [
+            [sg.Text("会议标题"), sg.Input(key="title", size=(25, 1)), sg.Text("会议主题"), sg.Input(key="topic", size=(25, 1))],
+            [sg.Text("时间地点"), sg.Input(key="time_place", size=(25, 1)), sg.Text("主持人"), sg.Input(key="host", size=(25, 1))],
+            [sg.Text("记录人"), sg.Input(key="recorder", size=(25, 1)), sg.Text("与会人员"), sg.Input(key="participants", size=(25, 1))],
+            [sg.Text("要点条目 (每行一条)"), sg.Multiline(key="notes", size=(80, 8))],
+            [
+                sg.Button("开始录音"),
+                sg.Button("标记重点"),
+                sg.Button("停止录音"),
+                sg.Button("生成快速版"),
+                sg.Button("录音校对"),
+                sg.Button("导入政策库"),
+                sg.Button("政策对照"),
+                sg.Button("导出纪要"),
+                sg.Button("一键销毁"),
+            ],
+            [sg.Multiline(key="log", size=(100, 12), disabled=True, autoscroll=True)],
+        ]
+        window = sg.Window("Offline Meeting Records", layout, finalize=True, resizable=True)
+        self.window = window
+        while True:
+            event, values = window.read(timeout=500)
+            if event == sg.WIN_CLOSED:
+                break
+            if event == sg.TIMEOUT_EVENT:
+                continue
+            try:
+                if event == "开始录音":
+                    self.handle_start_recording()
+                elif event == "标记重点":
+                    self.handle_mark()
+                elif event == "停止录音":
+                    self.handle_stop_recording()
+                elif event == "生成快速版":
+                    self.handle_quick_summary(values.get("notes", ""))
+                elif event == "录音校对":
+                    self.handle_proofreading()
+                elif event == "导入政策库":
+                    self.handle_import_policies()
+                elif event == "政策对照":
+                    self.handle_policy_lookup()
+                elif event == "导出纪要":
+                    self.handle_export(values)
+                elif event == "一键销毁":
+                    self.handle_destroy()
+            except Exception as exc:
+                self.log(f"操作失败：{exc}")
+                sg.popup_error(str(exc))
+        window.close()
+        self.policy_db.close()
+
+    def handle_start_recording(self) -> None:
+        try:
+            session_id = self.recorder.start()
+            self.log(f"录音开始，会话 {session_id}")
+            sg.popup("录音已开始。")
+        except RecorderError as exc:
+            sg.popup_error(str(exc))
+
+    def handle_mark(self) -> None:
+        label = sg.popup_get_text("请输入标记内容：")
+        if not label:
+            return
+        try:
+            self.recorder.mark(label)
+            self.log("已标记重点。")
+        except RecorderError as exc:
+            sg.popup_error(str(exc))
+
+    def handle_stop_recording(self) -> None:
+        try:
+            markers_path = self.recorder.stop()
+            self.log(f"录音已停止，标记保存在 {markers_path.name}")
+            sg.popup("录音已停止。")
+            self._enforce_retention()
+        except RecorderError as exc:
+            sg.popup_error(str(exc))
+
+    def handle_quick_summary(self, notes_text: str) -> None:
+        notes = notes_text.splitlines()
+        output = self.summarizer.generate_quick_summary(notes, self.summary_cfg["quick_filename"])
+        self.state.quick_summary_path = output
+        self.log(f"快速版纪要已生成：{output.name}")
+        sg.popup("快速版纪要已生成。")
+
+    def handle_proofreading(self) -> None:
+        if not self.asr:
+            raise RuntimeError("Vosk 模型未准备，无法进行录音校对。")
+        audio_dir = self.base_path / self.paths["audio_dir"]
+        wav_files = sorted(audio_dir.glob("*.wav"))
+        if not wav_files:
+            raise FileNotFoundError("未找到录音文件，请先完成录音。")
+        transcript_text = self.asr.transcribe_files(wav_files)
+        transcript_path = self._write_transcript(transcript_text)
+        proof_path = self.summarizer.generate_proofreading_summary(
+            transcript_text, self.summary_cfg["proofreading_prefix"]
+        )
+        self.state.proofreading_path = proof_path
+        self.state.transcript_path = transcript_path
+        quick_text = ""
+        if self.state.quick_summary_path and self.state.quick_summary_path.exists():
+            quick_text = load_text(self.state.quick_summary_path)
+        proof_text = load_text(proof_path)
+        diff_path = self.summarizer.generate_diff_report(
+            quick_text, proof_text, self.summary_cfg["diff_prefix"]
+        )
+        self.state.diff_path = diff_path
+        self.log("录音校对完成，已生成摘要与差异报告。")
+        sg.popup("录音校对完成。")
+        self._enforce_retention()
+
+    def _write_transcript(self, text: str) -> Path:
+        transcript_dir = self.base_path / self.paths["transcript_dir"]
+        transcript_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"trans_{time.strftime('%Y%m%d_%H%M%S')}.txt"
+        transcript_path = transcript_dir / filename
+        transcript_path.write_text(text, encoding="utf-8")
+        return transcript_path
+
+    def handle_import_policies(self) -> None:
+        count = self.policy_db.import_sources()
+        self.log(f"已导入 {count} 条制度内容。")
+        sg.popup(f"导入完成，共 {count} 条。仅提示，不构成合规结论。")
+
+    def handle_policy_lookup(self) -> None:
+        query_lines = []
+        if self.state.quick_summary_path and self.state.quick_summary_path.exists():
+            query_lines.extend(self._extract_query_lines(load_text(self.state.quick_summary_path)))
+        if self.state.proofreading_path and self.state.proofreading_path.exists():
+            query_lines.extend(self._extract_query_lines(load_text(self.state.proofreading_path)))
+        if not query_lines:
+            query = sg.popup_get_text("请输入检索关键词：")
+            if not query:
+                return
+            query_lines.append(query)
+        unique_queries = list(dict.fromkeys(query_lines))
+        results: List[dict] = []
+        for query in unique_queries:
+            results.extend(self.policy_db.search(query))
+        self.state.policy_results = results
+        self.log(f"政策对照提示 {len(results)} 条，仅供参考。")
+        sg.popup(f"已匹配到 {len(results)} 条制度提示，注意：仅提示，不构成合规结论。")
+
+    def _extract_query_lines(self, content: str) -> List[str]:
+        return [line.lstrip("- ") for line in content.splitlines() if line.startswith("-")]
+
+    def handle_export(self, values: dict) -> None:
+        minutes_dir = self.base_path / self.paths["minutes_dir"]
+        minutes_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"minutes_{time.strftime('%Y%m%d_%H%M%S')}.docx"
+        output_path = minutes_dir / filename
+        summary_title = "快速版纪要" if self.state.quick_summary_path else "录音校对摘要"
+        summary_content = ""
+        if self.state.proofreading_path and self.state.proofreading_path.exists():
+            summary_content = load_text(self.state.proofreading_path)
+        elif self.state.quick_summary_path and self.state.quick_summary_path.exists():
+            summary_content = load_text(self.state.quick_summary_path)
+        diff_content = ""
+        if self.state.diff_path and self.state.diff_path.exists():
+            diff_content = load_text(self.state.diff_path)
+        action_path = self.summarizer.summary_dir / self.summary_cfg["action_items_filename"]
+        action_items = load_action_items(action_path)
+        meeting_info = {
+            "title": values.get("title") or "会议纪要",
+            "topic": values.get("topic", ""),
+            "time_place": values.get("time_place", ""),
+            "host": values.get("host", ""),
+            "recorder": values.get("recorder", ""),
+            "participants": values.get("participants", ""),
+        }
+        create_minutes_document(
+            output_path=output_path,
+            meeting_info=meeting_info,
+            summary_title=summary_title,
+            summary_content=summary_content,
+            diff_content=diff_content if diff_content else None,
+            action_items=action_items,
+            policy_suggestions=self.state.policy_results,
+        )
+        self.log(f"纪要已导出：{output_path.name}")
+        sg.popup("纪要已导出。")
+
+    def handle_destroy(self) -> None:
+        include_minutes = sg.popup_yes_no("是否连同纪要一并销毁？") == "Yes"
+        self.destroyer.destroy(include_minutes=include_minutes)
+        self.log("一键销毁完成。")
+        sg.popup("指定目录已清理。")
+
+    def _enforce_retention(self) -> None:
+        self._cleanup_by_days(self.base_path / self.paths["audio_dir"], self.storage_cfg.get("retain_audio_days", -1))
+        self._cleanup_by_days(
+            self.base_path / self.paths["transcript_dir"], self.storage_cfg.get("retain_transcript_days", -1)
+        )
+
+    def _cleanup_by_days(self, directory: Path, days: int) -> None:
+        if days < 0:
+            return
+        if not directory.exists():
+            return
+        cutoff = time.time() - days * 86400
+        for item in directory.glob("**/*"):
+            try:
+                stat = item.stat()
+            except FileNotFoundError:
+                continue
+            if days == 0 or stat.st_mtime < cutoff:
+                if item.is_dir():
+                    continue
+                item.unlink()
+
+    def log(self, message: str) -> None:
+        timestamp = time.strftime("%H:%M:%S")
+        print(f"[{timestamp}] {message}")
+        if hasattr(self, "window") and self.window is not None:
+            log_elem = self.window["log"]
+            log_elem.update(disabled=False)
+            log_elem.print(f"[{timestamp}] {message}")
+            log_elem.update(disabled=True)
+
+
+def main() -> None:
+    base_path = Path(__file__).resolve().parent
+    config_path = base_path / "config.yaml"
+    app = OfflineMeetingApp(config_path)
+    app.run()
+
+
+if __name__ == "__main__":
+    main()
