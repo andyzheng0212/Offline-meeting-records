@@ -22,6 +22,9 @@ paths:
 
 asr:
   engine: vosk                      # 识别引擎，默认使用 Vosk
+  sdelete_path: bin/sdelete64.exe
+
+asr:
   model_path: models/vosk-model-cn  # 请自行下载 Vosk 中文模型并解压到该目录
   max_alternatives: 0
   words: true
@@ -47,3 +50,6 @@ secure_delete:
 
 logging:
   log_file: null             # 若需记录操作日志，请填写路径；默认为空表示不记录
+security:
+  overwrite_passes: 1      # SDelete 覆盖次数
+  log_file: null           # 若需记录操作日志，请填写路径；默认为空表示不记录

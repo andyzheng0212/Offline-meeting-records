@@ -34,6 +34,17 @@ policy_db/*
 !policy_db/.gitkeep
 policy_source/*
 !policy_source/.gitkeep
+models/
+bin/sdelete64.exe
+contacts/
+
+# Runtime generated directories
+audio_in/
+markers/
+transcripts/
+summaries/
+minutes/
+policy_db/
 
 # OS files
 .DS_Store
