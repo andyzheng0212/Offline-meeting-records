@@ -177,6 +177,27 @@ class OfflineMeetingApp:
         )
         self.window = window
         self._refresh_contact_status()
+        sg.theme("SystemDefault")
+        layout = [
+            [sg.Text("会议标题"), sg.Input(key="title", size=(25, 1)), sg.Text("会议主题"), sg.Input(key="topic", size=(25, 1))],
+            [sg.Text("时间地点"), sg.Input(key="time_place", size=(25, 1)), sg.Text("主持人"), sg.Input(key="host", size=(25, 1))],
+            [sg.Text("记录人"), sg.Input(key="recorder", size=(25, 1)), sg.Text("与会人员"), sg.Input(key="participants", size=(25, 1))],
+            [sg.Text("要点条目 (每行一条)"), sg.Multiline(key="notes", size=(80, 8))],
+            [
+                sg.Button("开始录音"),
+                sg.Button("标记重点"),
+                sg.Button("停止录音"),
+                sg.Button("生成快速版"),
+                sg.Button("录音校对"),
+                sg.Button("导入政策库"),
+                sg.Button("政策对照"),
+                sg.Button("导出纪要"),
+                sg.Button("一键销毁"),
+            ],
+            [sg.Multiline(key="log", size=(100, 12), disabled=True, autoscroll=True)],
+        ]
+        window = sg.Window("Offline Meeting Records", layout, finalize=True, resizable=True)
+        self.window = window
         while True:
             event, values = window.read(timeout=500)
             if event == sg.WIN_CLOSED:
@@ -350,6 +371,9 @@ class OfflineMeetingApp:
         self.log(f"纪要已导出：{output_path.name}")
         sg.popup("纪要已导出。")
         self.set_status(f"纪要已导出（模板：{template_choice}）。")
+        )
+        self.log(f"纪要已导出：{output_path.name}")
+        sg.popup("纪要已导出。")
 
     def handle_destroy(self) -> None:
         include_minutes = sg.popup_yes_no("是否连同纪要一并销毁？") == "Yes"

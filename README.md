@@ -12,6 +12,8 @@ Offline Meeting Records 是一款专为 Windows 桌面场景打造的离线会�
 - **制度提示**：本地导入制度文件，全文检索关键句，仅提供提示不作裁决。
 - **一键销毁**：支持调用 SDelete 覆盖删除，默认保留策略可配置。
 - **多模板导出**：内置党委会、项目会、招采会三套纪要版式，可在导出时一键切换。
+- **制度提示**：本地导入制度文件，全文检索关键句，仅提供提示不作裁决。
+- **一键销毁**：支持调用 SDelete 覆盖删除，默认保留策略可配置。
 
 ## 环境准备
 1. 安装 Python 3.10 及以上版本。
@@ -27,12 +29,14 @@ Offline Meeting Records 是一款专为 Windows 桌面场景打造的离线会�
 4. 下载 Vosk 中文模型（例如 `vosk-model-small-cn-0.22`），解压至 `./models/vosk-model-cn/`。
 5. （可选）将科室通讯录导出为 CSV，放置在 `./contacts/contacts.csv`，并确保第一列或列名 `name` 为员工姓名。
 6. （可选）下载并放置 `sdelete64.exe` 到 `./bin/`，用于覆盖删除。
+5. （可选）下载并放置 `sdelete64.exe` 到 `./bin/`，用于覆盖删除。
 
 ## 运行方式
 ```bash
 python app.py
 ```
 启动后即可在 GUI 中完成录音、生成快速纪要、录音校对、制度检索与纪要导出；可在“制度与导出”页签选择纪要模板，并通过“查看行动项”实时确认抽取结果。
+启动后即可在 GUI 中完成录音、生成快速纪要、录音校对、制度检索与纪要导出。
 
 ## PyInstaller 打包
 使用以下命令生成独立可执行文件：
@@ -78,6 +82,7 @@ Offline-meeting-records/
 ├─ policy_source/          # 制度原文件
 ├─ policy_db/              # SQLite 数据库
 └─ contacts/               # 科室通讯录（CSV，默认忽略）
+└─ policy_db/              # SQLite 数据库
 ```
 
 `.gitignore` 默认排除模型、音频、转写、摘要、制度库、可执行文件等敏感或体积较大的内容，避免误提交。
@@ -103,6 +108,12 @@ A: 确认 `policy_source/` 已放置 PDF/Word 文件并重新执行“导入政�
 
 **Q: 行动项责任人识别错误？**
 A: 请准备通讯录 CSV（支持含表头的 `name` 列或无表头第一列），更新 `config.yaml` 的 `summary.contact_csv` 路径并重启应用。
+
+**Q: 一键销毁提示失败？**  
+A: 检查 `bin/sdelete64.exe` 是否存在以及权限是否足够；若缺失将自动回退到普通删除。
+
+**Q: 政策库无匹配结果？**  
+A: 确认 `policy_source/` 已放置 PDF/Word 文件并重新执行“导入政策库”，同时检查检索关键词是否准确。
 
 ## CI 与打包自检
 - `pip install -r requirements.txt` 正常。
