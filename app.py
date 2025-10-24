@@ -351,6 +351,16 @@ class OfflineMeetingApp:
             sg.popup_ok(message)
             return
         count = self.policy_db.import_sources()
+        errors = self.policy_db.pop_last_errors()
+        self.log(f"已导入 {count} 条制度内容。")
+        message_lines = [f"导入完成，共 {count} 条。仅提示，不构成合规结论。"]
+        if errors:
+            error_text = "\n".join(errors[:5])
+            message_lines.extend(["", "以下文件导入失败（已跳过）：", error_text])
+            if len(errors) > 5:
+                message_lines.append("……")
+            self.log(f"部分制度文件导入失败：{'; '.join(errors)}")
+        sg.popup("\n".join(message_lines))
         self.log(f"已导入 {count} 条制度内容。")
         sg.popup(f"导入完成，共 {count} 条。仅提示，不构成合规结论。")
 

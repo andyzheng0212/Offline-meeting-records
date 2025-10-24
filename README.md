@@ -27,6 +27,7 @@ Offline Meeting Records 是一款面向政企本地部署的“离线、本地�
    5. 点击“政策对照”，查看匹配结果提示。 
    6. 填写会议信息并点击“导出纪要”，`minutes/` 生成 Docx 后，执行“一键销毁”验证清理提示。 
 
+> 若使用源码运行：建议安装 Python 3.10～3.14，执行 `pip install -r requirements.txt`，然后 `python app.py`。
 > 若使用源码运行：安装 Python 3.10+，执行 `pip install -r requirements.txt`，然后 `python app.py`。 
 
 ## ⚙️ 构建与自动化
@@ -41,6 +42,9 @@ Offline Meeting Records 是一款面向政企本地部署的“离线、本地�
     app.py
   ```
   打包后 dist/LocalMeetingBot/ 即为绿色版目录。 
+- **GitHub Actions**：推送 `v*.*.*` 标签或手动 `workflow_dispatch` 会触发 `.github/workflows/windows-build.yml`，Windows runner 会安装依赖、执行上述 PyInstaller 命令，并上传 `LocalMeetingBot_win` 工件。
+- **PyInstaller 配置亮点**：采用 PowerShell 参数数组防止续行解析错误；仅当目录存在时才附加 `--add-data`，避免空目录报错。
+- **Web UI 绿色包**：推送 `v*.*.*` 标签或手动触发 `.github/workflows/windows-web-bundle.yml`，自动打包 `OfflineWebBundle_win.zip`，内含 Streamlit Web 程序、启动脚本与目录骨架，解压即可双击 `start_web.bat`。
 - **GitHub Actions**：推送 `v*.*.*` 标签或手动 `workflow_dispatch` 会触发 `.github/workflows/windows-build.yml`，Windows runner 会安装依赖、执行上述 PyInstaller 命令，并上传 `LocalMeetingBot_win` 工件。 
 - **PyInstaller 配置亮点**：采用 PowerShell 参数数组防止续行解析错误；仅当目录存在时才附加 `--add-data`，避免空目录报错。 
 

@@ -163,6 +163,12 @@ def main() -> None:
     st.title("Offline Meeting Records · 本地离线 Web 界面")
     st.caption("离线运行 · 本地存储 · 制度提示仅供参考，不构成合规结论")
 
+    model_dir = BASE_DIR / CONFIG["asr"]["model_path"]
+    if not model_dir.exists():
+        st.warning(
+            "未检测到 Vosk 中文模型目录，请将模型解压至 models/vosk-model-cn/ 后重试。详见 README_WEB.md。"
+        )
+
     tabs = st.tabs([
         "快速版纪要",
         "录音转写校对",
@@ -245,6 +251,12 @@ def main() -> None:
                 st.warning("未检测到 PDF 或 Word 制度文件，将跳过导入。")
             else:
                 count = policy_db.import_sources()
+                errors = policy_db.pop_last_errors()
+                if errors:
+                    st.warning(
+                        "部分制度文件导入失败（已跳过）：\n" + "\n".join(errors[:5])
+                        + ("\n……" if len(errors) > 5 else "")
+                    )
                 st.success(f"导入完成，共 {count} 条制度条款。")
 
         summary_options: Dict[str, Path] = {}
@@ -387,6 +399,18 @@ def main() -> None:
             removed = result.get("results", [])
             st.markdown("#### 已清理目录")
             for item in removed:
+                raw_path = getattr(item, "path", None)
+                if raw_path is None:
+                    continue
+                path_obj = Path(raw_path)
+                try:
+                    display_path = path_obj.relative_to(BASE_DIR)
+                except ValueError:
+                    display_path = path_obj
+                mode = getattr(item, "mode", "")
+                existed = getattr(item, "existed", False)
+                status = "已清理" if existed else "原本为空"
+                st.markdown(f"- {display_path} → {status}（模式：{mode}）")
                 path = item.path if hasattr(item, "path") else getattr(item, "path", None)
                 mode = getattr(item, "mode", "")
                 existed = getattr(item, "existed", False)

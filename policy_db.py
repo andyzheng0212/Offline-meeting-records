@@ -30,6 +30,8 @@ class PolicyDatabase:
         self.config.policy_db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(self.config.policy_db_path)
         self.conn.execute("PRAGMA journal_mode=WAL;")
+        self.fts_available = True
+        self._last_errors: List[str] = []
         self._init_schema()
 
     def _init_schema(self) -> None:
@@ -45,6 +47,17 @@ class PolicyDatabase:
             )
             """
         )
+        try:
+            cur.execute(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS policies_fts USING fts5(
+                    title, section, content, content='policies', content_rowid='id'
+                )
+                """
+            )
+        except sqlite3.OperationalError:
+            # FTS5 may be unavailable in some SQLite builds (e.g. custom/minimal builds)
+            self.fts_available = False
         cur.execute(
             """
             CREATE VIRTUAL TABLE IF NOT EXISTS policies_fts USING fts5(
@@ -60,6 +73,44 @@ class PolicyDatabase:
     def import_sources(self) -> int:
         files = list(self.config.policy_source_dir.glob("**/*"))
         entries: List[Tuple[str, str, str, str]] = []
+        self._last_errors = []
+        for file in files:
+            if not file.is_file():
+                continue
+            try:
+                if file.suffix.lower() == ".pdf":
+                    text = extract_text(str(file))
+                elif file.suffix.lower() == ".docx":
+                    text = self._extract_docx(file)
+                else:
+                    continue
+                entries.extend(self._split_sections(file.stem, file.name, text))
+            except Exception as exc:  # pylint: disable=broad-except
+                message = f"{file.name}: {exc}"
+                print(f"[PolicyDB] 导入失败 {message}")
+                self._last_errors.append(message)
+        with self.conn:
+            self.conn.execute("DELETE FROM policies")
+            if self.fts_available:
+                try:
+                    self.conn.execute("DELETE FROM policies_fts")
+                except sqlite3.OperationalError:
+                    self.fts_available = False
+            self.conn.executemany(
+                "INSERT INTO policies(title, section, source, content) VALUES (?, ?, ?, ?)", entries
+            )
+            if self.fts_available:
+                try:
+                    self.conn.execute("INSERT INTO policies_fts(policies_fts) VALUES('rebuild')")
+                except sqlite3.OperationalError:
+                    self.fts_available = False
+        return len(entries)
+
+    def pop_last_errors(self) -> List[str]:
+        errors = list(self._last_errors)
+        self._last_errors.clear()
+        return errors
+
         for file in files:
             if file.suffix.lower() == ".pdf":
                 text = extract_text(str(file))
@@ -115,6 +166,24 @@ class PolicyDatabase:
         if not query.strip():
             return []
         snippet_length = self.config.snippet_length
+        try:
+            if self.fts_available:
+                sql = (
+                    "SELECT p.title, p.section, p.source, "
+                    "snippet(policies_fts, 2, '[', ']', '...', ?) as snippet "
+                    "FROM policies_fts JOIN policies p ON p.id = policies_fts.rowid "
+                    "WHERE policies_fts MATCH ? LIMIT ?"
+                )
+                cursor = self.conn.execute(sql, (snippet_length, query, self.config.top_k))
+            else:
+                raise sqlite3.OperationalError
+        except sqlite3.OperationalError:
+            like_query = f"%{query.strip()}%"
+            cursor = self.conn.execute(
+                "SELECT title, section, source, substr(content, 1, ?) as snippet "
+                "FROM policies WHERE content LIKE ? OR title LIKE ? OR section LIKE ? LIMIT ?",
+                (snippet_length, like_query, like_query, like_query, self.config.top_k),
+            )
         sql = (
             "SELECT p.title, p.section, p.source, "
             "snippet(policies_fts, 2, '[', ']', '...', ?) as snippet "

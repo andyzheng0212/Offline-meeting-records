@@ -69,6 +69,10 @@ def _add_kv_paragraph(document: Document, key: str, value: str) -> None:
 def load_action_items(path: Path) -> List[Dict[str, str]]:
     if not path.exists():
         return []
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -152,6 +156,17 @@ def create_minutes_document(
             row_cells[1].text = item.get("what", "")
             row_cells[2].text = item.get("when", "")
     else:
+        document.add_paragraph("（无）")
+
+    _add_heading(document, template["policy_heading"], level=1)
+    document.add_paragraph("以下提示仅供参考，不构成合规结论。")
+    limited_policy = policy_suggestions[:20]
+    if policy_suggestions and len(policy_suggestions) > len(limited_policy):
+        document.add_paragraph("仅展示前 20 条制度匹配结果。")
+    if limited_policy:
+        table = document.add_table(rows=1, cols=4)
+        header_cells = table.rows[0].cells
+        headers = template["policy_headers"]
         document.add_paragraph("暂无行动项。")
 
     _add_heading(document, template["policy_heading"], level=1)
@@ -166,6 +181,7 @@ def create_minutes_document(
             paragraph = cell.paragraphs[0]
             run = paragraph.add_run(text)
             run.bold = True
+        for suggestion in limited_policy:
         for suggestion in policy_suggestions:
             row = table.add_row().cells
             row[0].text = suggestion.get("title", "")
