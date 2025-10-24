@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+.env
+
+# Build artifacts
+dist/
+build/
+*.spec
+
+# Models and binaries
+models/*
+!models/.gitkeep
+bin/sdelete64.exe
+bin/*
+!bin/.gitkeep
+contacts/
+
+# Runtime generated directories
+audio_in/*
+!audio_in/.gitkeep
+markers/*
+!markers/.gitkeep
+transcripts/*
+!transcripts/.gitkeep
+summaries/*
+!summaries/.gitkeep
+minutes/*
+!minutes/.gitkeep
+policy_db/*
+!policy_db/.gitkeep
+policy_source/*
+!policy_source/.gitkeep
+
+# OS files
+.DS_Store
+Thumbs.db
