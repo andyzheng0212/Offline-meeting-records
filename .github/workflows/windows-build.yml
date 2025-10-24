@@ -34,9 +34,17 @@ jobs:
             --add-data "models;models" `
             --add-data "policy_db;policy_db" `
             --add-data "bin;bin" `
+      - name: Build executable
+        run: |
+          pyinstaller --noconfirm --clean --name OfflineMeetingRecords \
+            --add-data "config.yaml;." \
+            --add-data "policy_source;policy_source" \
+            --add-data "models;models" \
             app.py
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: LocalMeetingBot_win
           path: dist/LocalMeetingBot/
+          name: OfflineMeetingRecords
+          path: dist/OfflineMeetingRecords/
